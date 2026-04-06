@@ -16,3 +16,5 @@ pytz
 geopandas
 dask
 pygrib
+scikit-learn
+scipy
