@@ -32,8 +32,9 @@ CONUS_EXTENT = (-127.0, -66.0, 20.0, 54.0)
 MRMS_MISSING_VALUE = -999.0
 DEFAULT_TIMEOUT = 120
 DEFAULT_PLOT_STRIDE = 8
-MIN_REFLECTIVITY_DBZ = 10.0
-DEFAULT_SMOOTHING_SIGMA = 1.0
+MIN_REFLECTIVITY_DBZ = 5.0
+DEFAULT_SMOOTHING_SIGMA = 0.35
+MAX_PNG_HISTORY = 8
 REFLECTIVITY_LEVELS_DBZ = [
     0.0,
     5.0,
@@ -345,6 +346,18 @@ def write_filtered_data(paths: MRMSFramePaths, reflectivity_dbz: np.ndarray, lat
     )
 
 
+def prune_old_pngs(root: Path, max_png_history: int = MAX_PNG_HISTORY) -> None:
+    if max_png_history < 1:
+        return
+
+    png_files = sorted((root / "mrms" / "png").glob("**/*.png"), key=lambda path: path.stat().st_mtime, reverse=True)
+    for old_path in png_files[max_png_history:]:
+        try:
+            old_path.unlink()
+        except FileNotFoundError:
+            continue
+
+
 def ingest_once(root: Path, timeout: int, plot_stride: int, overwrite: bool) -> MRMSFramePaths:
     temp_dir = root / "mrms" / "tmp"
     temp_dir.mkdir(parents=True, exist_ok=True)
@@ -383,6 +396,7 @@ def ingest_once(root: Path, timeout: int, plot_stride: int, overwrite: bool) -> 
         stride=plot_stride,
         title_prefix="MRMS Reflectivity At Lowest Altitude",
     )
+    prune_old_pngs(root)
     write_metadata(frame_paths, reflectivity_dbz)
     logging.info("Saved MRMS frame to %s", frame_paths.raw_path)
     logging.info("Saved filtered MRMS data to %s", frame_paths.filtered_data_path)
