@@ -57,6 +57,13 @@ DEFAULT_TEST_FRACTION = 0.2
 DEFAULT_NEIGHBORHOOD_RADIUS = 2
 
 
+def relative_path_string(path: Path, root: Path) -> str:
+    try:
+        return path.relative_to(root).as_posix()
+    except ValueError:
+        return path.as_posix()
+
+
 @dataclass(frozen=True)
 class LocalRun:
     tag: str
@@ -467,7 +474,7 @@ def training_examples_for_pair(
     summary = {
         "run_tag": run_cycle.tag,
         "forecast_hour": forecast_hour,
-        "mrms_path": str(mrms_path),
+        "mrms_path": relative_path_string(mrms_path, root),
         "target_valid_time_utc": ensure_utc(target_time).isoformat(),
         "mrms_valid_time_utc": ensure_utc(mrms_valid_time).isoformat(),
         "sample_count": int(valid_indices.size),
@@ -750,7 +757,7 @@ def main() -> None:
                 "run_tag": run_cycle.tag,
                 "metrics": metrics,
                 "training_pairs": training_pairs,
-                "model_path": str(model_save_path),
+                "model_path": relative_path_string(model_save_path, output_root),
             },
             indent=2,
             default=str,
@@ -763,7 +770,7 @@ def main() -> None:
             "run_tag": run_cycle.tag,
             "created_at_utc": dt.datetime.now(tz=UTC).isoformat(),
             "metrics": metrics,
-            "model_path": str(model_save_path),
+            "model_path": relative_path_string(model_save_path, output_root),
         },
     )
     plot_verification_scatter(verify_root / "verification_scatter.png", y_test, y_pred, metrics)
