@@ -21,8 +21,9 @@ from matplotlib import pyplot as plt
 from matplotlib.colors import BoundaryNorm, ListedColormap
 from scipy.ndimage import gaussian_filter
 
+APP_ROOT = Path(__file__).resolve().parent
 UTC = dt.timezone.utc
-DEFAULT_OUTPUT_ROOT = Path.cwd() / "DATA"
+DEFAULT_OUTPUT_ROOT = APP_ROOT / "DATA"
 MRMS_URL = (
     "https://mrms.ncep.noaa.gov/2D/ReflectivityAtLowestAltitude/"
     "MRMS_ReflectivityAtLowestAltitude.latest.grib2.gz"
@@ -142,6 +143,13 @@ def ensure_utc(timestamp: dt.datetime) -> dt.datetime:
     if timestamp.tzinfo is None:
         return timestamp.replace(tzinfo=UTC)
     return timestamp.astimezone(UTC)
+
+
+def relative_path_string(path: Path, root: Path) -> str:
+    try:
+        return path.relative_to(root).as_posix()
+    except ValueError:
+        return path.as_posix()
 
 
 def normalize_longitudes(
@@ -305,11 +313,12 @@ def plot_reflectivity_map(
 
 def write_metadata(paths: MRMSFramePaths, reflectivity_dbz: np.ndarray) -> None:
     finite_values = reflectivity_dbz[np.isfinite(reflectivity_dbz)]
+    root = paths.raw_path.parents[3]
     payload = {
         "valid_time_utc": ensure_utc(paths.valid_time).isoformat(),
-        "raw_grib_path": str(paths.raw_path),
-        "filtered_data_path": str(paths.filtered_data_path),
-        "png_path": str(paths.png_path),
+        "raw_grib_path": relative_path_string(paths.raw_path, root),
+        "filtered_data_path": relative_path_string(paths.filtered_data_path, root),
+        "png_path": relative_path_string(paths.png_path, root),
         "min_dbz": float(np.min(finite_values)) if finite_values.size else None,
         "max_dbz": float(np.max(finite_values)) if finite_values.size else None,
         "mean_dbz": float(np.mean(finite_values)) if finite_values.size else None,
