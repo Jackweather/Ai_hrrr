@@ -527,9 +527,9 @@ def collect_training_pairs(
             )
             if pair is None:
                 continue
-                training_pairs.append(pair)
+            training_pairs.append(pair)
 
-            return training_pairs
+    return training_pairs
 
 
 def append_metrics_history(root: Path, payload: dict[str, object]) -> None:
@@ -706,6 +706,10 @@ def main() -> None:
     if not training_pairs:
         raise RuntimeError(
             "Could not build any HRRR/MRMS training pairs. Let the MRMS collector run for a while or relax --match-tolerance-minutes."
+        )
+    if len(training_pairs) < 2:
+        raise RuntimeError(
+            "Built only one HRRR/MRMS training pair. Collect more MRMS history or increase --match-tolerance-minutes so the model has both train and test data."
         )
 
     train_pairs, test_pairs = split_training_pairs(training_pairs, test_fraction=args.test_fraction)
