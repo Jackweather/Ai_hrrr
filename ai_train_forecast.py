@@ -14,6 +14,7 @@ import cartopy.feature as cfeature
 import matplotlib
 matplotlib.use("Agg")
 import numpy as np
+import pygrib
 from matplotlib import pyplot as plt
 from sklearn.ensemble import HistGradientBoostingRegressor
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
@@ -29,7 +30,6 @@ from HRRR_prate import (
     NomadsClient,
     build_url,
     download_file,
-    load_prate_mmhr,
     local_grib_path,
     resolve_latest_available_cycle,
     setup_logging,
@@ -55,6 +55,7 @@ DEFAULT_REQUEST_TIMEOUT = 180
 DEFAULT_TRAINING_DAYS = 7
 DEFAULT_TEST_FRACTION = 0.2
 DEFAULT_NEIGHBORHOOD_RADIUS = 2
+AI_MIN_PLOT_DBZ = 5.0
 
 
 def relative_path_string(path: Path, root: Path) -> str:
@@ -62,6 +63,47 @@ def relative_path_string(path: Path, root: Path) -> str:
         return path.relative_to(root).as_posix()
     except ValueError:
         return path.as_posix()
+
+
+def normalize_longitudes(
+    values: np.ndarray,
+    lats: np.ndarray,
+    lons: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    if np.nanmax(lons) <= 180:
+        return values, lats, lons
+
+    adjusted_lons = np.where(lons > 180, lons - 360, lons)
+    sort_order = np.argsort(adjusted_lons[0, :])
+    return values[:, sort_order], lats[:, sort_order], adjusted_lons[:, sort_order]
+
+
+def load_hrrr_prate_mmhr(grib_path: Path) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    grib_file = pygrib.open(str(grib_path))
+    message = None
+
+    try:
+        for candidate in grib_file:
+            if getattr(candidate, "shortName", None) != "prate":
+                continue
+            if getattr(candidate, "typeOfLevel", None) != "surface":
+                continue
+            message = candidate
+            break
+
+        if message is None:
+            raise RuntimeError(f"Could not find a surface precipitation-rate field in {grib_path.name}.")
+
+        values = np.asarray(message.values, dtype=np.float32)
+        lats, lons = message.latlons()
+    finally:
+        grib_file.close()
+
+    return normalize_longitudes(
+        np.maximum(values, 0.0) * 3600.0,
+        np.asarray(lats, dtype=np.float32),
+        np.asarray(lons, dtype=np.float32),
+    )
 
 
 @dataclass(frozen=True)
@@ -252,7 +294,7 @@ def reflectivity_cmap():
 
 def mask_reflectivity_for_plot(field: np.ndarray) -> np.ma.MaskedArray:
     smoothed = smooth_field_for_contours(field)
-    return np.ma.masked_less_equal(np.ma.masked_invalid(smoothed), MIN_REFLECTIVITY_DBZ)
+    return np.ma.masked_less(np.ma.masked_invalid(smoothed), AI_MIN_PLOT_DBZ)
 
 
 def ensure_hrrr_files(
@@ -440,7 +482,7 @@ def training_examples_for_pair(
     else:
         grib_path = local_grib_path(root, run_cycle, forecast_hour)
 
-    prate_mmhr, hrrr_lats, hrrr_lons = load_prate_mmhr(grib_path)
+    prate_mmhr, hrrr_lats, hrrr_lons = load_hrrr_prate_mmhr(grib_path)
     mrms_values, mrms_lats, mrms_lons, mrms_valid_time = load_mrms_reflectivity(mrms_path)
 
     prate_coarse = prate_mmhr[::hrrr_stride, ::hrrr_stride]
@@ -777,7 +819,7 @@ def main() -> None:
 
     latest_comparison_written = False
     for forecast_hour in range(max_forecast_hour + 1):
-        prate_mmhr, hrrr_lats, hrrr_lons = load_prate_mmhr(local_grib_path(output_root, run_cycle, forecast_hour))
+        prate_mmhr, hrrr_lats, hrrr_lons = load_hrrr_prate_mmhr(local_grib_path(output_root, run_cycle, forecast_hour))
         prate_coarse = prate_mmhr[::args.hrrr_stride, ::args.hrrr_stride]
         lats_coarse = hrrr_lats[::args.hrrr_stride, ::args.hrrr_stride]
         lons_coarse = hrrr_lons[::args.hrrr_stride, ::args.hrrr_stride]
