@@ -149,12 +149,12 @@ def run_task1():
 def run_task2():
     scripts = [
         ("/opt/render/project/src/HRRR_prate.py", "/opt/render/project/src"),
-        ("/opt/render/project/src/ai_forecast.py", "/opt/render/project/src"),
+        ("/opt/render/project/src/ai_train_forecast.py", "/opt/render/project/src"),
         
         
     ]
     threading.Thread(
-        target=lambda: run_scripts(scripts, 3, parallel=True, max_parallel=1),
+        target=lambda: run_scripts(scripts, 2, parallel=True, max_parallel=1),
         daemon=True,
     ).start()
     return "Task started in background! Check logs folder for output.", 200
