@@ -77,6 +77,14 @@ class LocalRun:
         return 48 if self.cycle_hour in {0, 6, 12, 18} else 18
 
 
+@dataclass(frozen=True)
+class TrainingPairSamples:
+    features: np.ndarray
+    targets: np.ndarray
+    valid_time: np.datetime64
+    summary: dict[str, str | int | float]
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
@@ -328,9 +336,9 @@ def align_mrms_to_hrrr(
         distances = np.full(hrrr_lats.shape, np.nan, dtype=np.float32)
         return aligned, distances
 
-    source_points = np.column_stack((mrms_lats_coarse[finite_mask], mrms_lons_coarse[finite_mask]))
+    source_points = np.column_stack((mrms_lats_coarse[finite_mask], mrms_lons_coarse[finite_mask])).astype(np.float32)
     tree = cKDTree(source_points)
-    query_points = np.column_stack((hrrr_lats.ravel(), hrrr_lons.ravel()))
+    query_points = np.column_stack((hrrr_lats.ravel(), hrrr_lons.ravel())).astype(np.float32)
     distances, indices = tree.query(query_points, k=1)
     aligned_flat = mrms_values_coarse[finite_mask][indices]
     return aligned_flat.reshape(hrrr_lats.shape).astype(np.float32), distances.reshape(hrrr_lats.shape).astype(np.float32)
@@ -360,59 +368,55 @@ def build_feature_matrix(
     valid_time_utc: dt.datetime,
     neighborhood_radius: int,
 ) -> np.ndarray:
-    prate_nonnegative = np.maximum(prate_mmhr, 0.0)
-    log_prate = np.log1p(prate_nonnegative)
+    prate_nonnegative = np.maximum(prate_mmhr, 0.0).astype(np.float32, copy=False)
+    log_prate = np.log1p(prate_nonnegative, dtype=np.float32)
     local_mean = rolling_statistic(prate_nonnegative, neighborhood_radius, "mean")
     local_max = rolling_statistic(prate_nonnegative, neighborhood_radius, "max")
     local_std = rolling_statistic(prate_nonnegative, neighborhood_radius, "std")
-    gradient_y, gradient_x = np.gradient(prate_nonnegative.astype(np.float32))
+    gradient_y, gradient_x = np.gradient(prate_nonnegative)
     valid_time_utc = ensure_utc(valid_time_utc)
     day_of_year = valid_time_utc.timetuple().tm_yday
     hour_fraction = valid_time_utc.hour + (valid_time_utc.minute / 60.0)
     diurnal_angle = 2.0 * np.pi * (hour_fraction / 24.0)
     annual_angle = 2.0 * np.pi * (day_of_year / 366.0)
 
-    return np.column_stack(
-        (
-            log_prate.ravel(),
-            np.sqrt(prate_nonnegative.ravel()),
-            prate_nonnegative.ravel(),
-            local_mean.ravel(),
-            local_max.ravel(),
-            local_std.ravel(),
-            gradient_x.ravel(),
-            gradient_y.ravel(),
-            np.full(prate_mmhr.size, float(forecast_hour), dtype=np.float32),
-            np.full(prate_mmhr.size, np.sin(diurnal_angle), dtype=np.float32),
-            np.full(prate_mmhr.size, np.cos(diurnal_angle), dtype=np.float32),
-            np.full(prate_mmhr.size, np.sin(annual_angle), dtype=np.float32),
-            np.full(prate_mmhr.size, np.cos(annual_angle), dtype=np.float32),
-            lats.ravel(),
-            lons.ravel(),
-        )
-    )
+    feature_count = 15
+    features = np.empty((prate_mmhr.size, feature_count), dtype=np.float32)
+    features[:, 0] = log_prate.ravel()
+    features[:, 1] = np.sqrt(prate_nonnegative.ravel(), dtype=np.float32)
+    features[:, 2] = prate_nonnegative.ravel()
+    features[:, 3] = local_mean.ravel()
+    features[:, 4] = local_max.ravel()
+    features[:, 5] = local_std.ravel()
+    features[:, 6] = gradient_x.ravel()
+    features[:, 7] = gradient_y.ravel()
+    features[:, 8] = np.float32(forecast_hour)
+    features[:, 9] = np.float32(np.sin(diurnal_angle))
+    features[:, 10] = np.float32(np.cos(diurnal_angle))
+    features[:, 11] = np.float32(np.sin(annual_angle))
+    features[:, 12] = np.float32(np.cos(annual_angle))
+    features[:, 13] = lats.ravel().astype(np.float32, copy=False)
+    features[:, 14] = lons.ravel().astype(np.float32, copy=False)
+    return features
 
 
-def time_based_split(
-    features: np.ndarray,
-    targets: np.ndarray,
-    valid_times: np.ndarray,
+def split_training_pairs(
+    samples: list[TrainingPairSamples],
     test_fraction: float,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-    order = np.argsort(valid_times.astype("datetime64[ns]"))
-    split_index = max(1, int(np.floor(order.size * (1.0 - test_fraction))))
-    split_index = min(split_index, order.size - 1)
+) -> tuple[list[TrainingPairSamples], list[TrainingPairSamples]]:
+    ordered = sorted(samples, key=lambda item: item.valid_time)
+    split_index = max(1, int(np.floor(len(ordered) * (1.0 - test_fraction))))
+    split_index = min(split_index, len(ordered) - 1)
+    return ordered[:split_index], ordered[split_index:]
 
-    train_idx = order[:split_index]
-    test_idx = order[split_index:]
-    return (
-        features[train_idx],
-        features[test_idx],
-        targets[train_idx],
-        targets[test_idx],
-        valid_times[train_idx],
-        valid_times[test_idx],
-    )
+
+def stack_training_pairs(
+    samples: list[TrainingPairSamples],
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    features = np.concatenate([sample.features for sample in samples], axis=0)
+    targets = np.concatenate([sample.targets for sample in samples], axis=0)
+    valid_times = np.array([sample.valid_time for sample in samples], dtype="datetime64[ns]")
+    return features, targets, valid_times
 
 
 def training_examples_for_pair(
@@ -425,7 +429,7 @@ def training_examples_for_pair(
     max_samples: int,
     neighborhood_radius: int,
     rng: np.random.Generator,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray, dict[str, str | int | float]] | None:
+) -> TrainingPairSamples | None:
     target_time = valid_time(run_cycle, forecast_hour)
     mrms_path = nearest_mrms_file(root, target_time, tolerance_minutes=match_tolerance_minutes)
     if mrms_path is None:
@@ -468,9 +472,9 @@ def training_examples_for_pair(
     if valid_indices.size > max_samples:
         valid_indices = rng.choice(valid_indices, size=max_samples, replace=False)
 
-    feature_subset = features[valid_indices]
-    target_subset = targets[valid_indices]
-    valid_times = np.full(valid_indices.size, np.datetime64(ensure_utc(target_time).replace(tzinfo=None)), dtype="datetime64[ns]")
+    feature_subset = features[valid_indices].astype(np.float32, copy=False)
+    target_subset = targets[valid_indices].astype(np.float32, copy=False)
+    pair_valid_time = np.datetime64(ensure_utc(target_time).replace(tzinfo=None), "ns")
     summary = {
         "run_tag": run_cycle.tag,
         "forecast_hour": forecast_hour,
@@ -479,7 +483,12 @@ def training_examples_for_pair(
         "mrms_valid_time_utc": ensure_utc(mrms_valid_time).isoformat(),
         "sample_count": int(valid_indices.size),
     }
-    return feature_subset, target_subset, valid_times, summary
+    return TrainingPairSamples(
+        features=feature_subset,
+        targets=target_subset,
+        valid_time=pair_valid_time,
+        summary=summary,
+    )
 
 
 def collect_training_pairs(
@@ -493,12 +502,9 @@ def collect_training_pairs(
     max_samples: int,
     neighborhood_radius: int,
     rng: np.random.Generator,
-) -> tuple[list[np.ndarray], list[np.ndarray], list[np.ndarray], list[dict[str, str | int | float]]]:
+) -> list[TrainingPairSamples]:
     earliest_time = ensure_utc(run_limit_time) - dt.timedelta(days=training_days)
-    training_features: list[np.ndarray] = []
-    training_targets: list[np.ndarray] = []
-    training_valid_times: list[np.ndarray] = []
-    training_pairs: list[dict[str, str | int | float]] = []
+    training_pairs: list[TrainingPairSamples] = []
 
     for run in iter_local_hrrr_runs(root):
         if run.init_time < earliest_time or run.init_time > ensure_utc(run_limit_time):
@@ -521,13 +527,9 @@ def collect_training_pairs(
             )
             if pair is None:
                 continue
-            features, targets, valid_times, summary = pair
-            training_features.append(features)
-            training_targets.append(targets)
-            training_valid_times.append(valid_times)
-            training_pairs.append(summary)
+                training_pairs.append(pair)
 
-    return training_features, training_targets, training_valid_times, training_pairs
+            return training_pairs
 
 
 def append_metrics_history(root: Path, payload: dict[str, object]) -> None:
@@ -688,7 +690,7 @@ def main() -> None:
         ensure_hrrr_files(output_root, client, run_cycle, max_forecast_hour=max_forecast_hour, overwrite=args.overwrite)
 
     rng = np.random.default_rng(42)
-    training_features, training_targets, training_valid_times, training_pairs = collect_training_pairs(
+    training_pairs = collect_training_pairs(
         root=output_root,
         run_limit_time=run_cycle.init_time,
         max_forecast_hour=max_forecast_hour,
@@ -701,20 +703,14 @@ def main() -> None:
         rng=rng,
     )
 
-    if not training_features:
+    if not training_pairs:
         raise RuntimeError(
             "Could not build any HRRR/MRMS training pairs. Let the MRMS collector run for a while or relax --match-tolerance-minutes."
         )
 
-    x_all = np.vstack(training_features).astype(np.float32)
-    y_all = np.concatenate(training_targets).astype(np.float32)
-    t_all = np.concatenate(training_valid_times)
-    x_train, x_test, y_train, y_test, t_train, t_test = time_based_split(
-        x_all,
-        y_all,
-        t_all,
-        test_fraction=args.test_fraction,
-    )
+    train_pairs, test_pairs = split_training_pairs(training_pairs, test_fraction=args.test_fraction)
+    x_train, y_train, t_train = stack_training_pairs(train_pairs)
+    x_test, y_test, t_test = stack_training_pairs(test_pairs)
 
     model = HistGradientBoostingRegressor(
         loss="squared_error",
@@ -732,7 +728,7 @@ def main() -> None:
         "rmse_dbz": float(np.sqrt(mean_squared_error(y_test, y_pred))),
         "mae_dbz": float(mean_absolute_error(y_test, y_pred)),
         "r2": float(r2_score(y_test, y_pred)),
-        "sample_count": int(y_all.size),
+        "sample_count": int(y_train.size + y_test.size),
         "train_sample_count": int(y_train.size),
         "test_sample_count": int(y_test.size),
         "training_pair_count": len(training_pairs),
@@ -756,7 +752,7 @@ def main() -> None:
             {
                 "run_tag": run_cycle.tag,
                 "metrics": metrics,
-                "training_pairs": training_pairs,
+                "training_pairs": [pair.summary for pair in training_pairs],
                 "model_path": relative_path_string(model_save_path, output_root),
             },
             indent=2,
