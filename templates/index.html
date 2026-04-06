@@ -1,0 +1,439 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Forecast PNG Viewer</title>
+    <style>
+        :root {
+            --bg: #edf2f7;
+            --surface: rgba(255, 255, 255, 0.9);
+            --text: #132a3a;
+            --muted: #4c6172;
+            --accent: #0f6cbd;
+            --border: rgba(19, 42, 58, 0.12);
+            --shadow: 0 18px 40px rgba(22, 46, 66, 0.12);
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            margin: 0;
+            font-family: "Segoe UI", "Trebuchet MS", sans-serif;
+            color: var(--text);
+            background:
+                radial-gradient(circle at top left, rgba(15, 108, 189, 0.12), transparent 35%),
+                radial-gradient(circle at top right, rgba(54, 179, 126, 0.14), transparent 28%),
+                linear-gradient(180deg, #f8fbfd 0%, var(--bg) 100%);
+        }
+
+        header {
+            padding: 32px 24px 20px;
+            max-width: 1280px;
+            margin: 0 auto;
+        }
+
+        h1 {
+            margin: 0;
+            font-size: clamp(2rem, 3vw, 3.4rem);
+            line-height: 1;
+            letter-spacing: -0.04em;
+        }
+
+        .subtitle {
+            margin-top: 12px;
+            max-width: 760px;
+            color: var(--muted);
+            font-size: 1rem;
+            line-height: 1.6;
+        }
+
+        .summary {
+            display: inline-flex;
+            margin-top: 18px;
+            padding: 10px 14px;
+            border-radius: 999px;
+            background: rgba(15, 108, 189, 0.08);
+            color: var(--accent);
+            font-weight: 600;
+        }
+
+        .hint {
+            margin-top: 12px;
+            color: var(--muted);
+            font-size: 0.95rem;
+        }
+
+        main {
+            max-width: 1280px;
+            margin: 0 auto;
+            padding: 8px 24px 36px;
+        }
+
+        .section {
+            margin-top: 28px;
+            padding: 22px;
+            border: 1px solid var(--border);
+            border-radius: 24px;
+            background: var(--surface);
+            box-shadow: var(--shadow);
+            backdrop-filter: blur(12px);
+        }
+
+        .section-header {
+            display: flex;
+            justify-content: space-between;
+            gap: 12px;
+            align-items: flex-end;
+            margin-bottom: 16px;
+        }
+
+        .section-header h2 {
+            margin: 0;
+            font-size: 1.35rem;
+        }
+
+        .section-header p {
+            margin: 8px 0 0;
+            color: var(--muted);
+        }
+
+        .count {
+            flex-shrink: 0;
+            padding: 8px 12px;
+            border-radius: 999px;
+            background: rgba(19, 42, 58, 0.06);
+            color: var(--muted);
+            font-size: 0.9rem;
+        }
+
+        .empty {
+            margin: 0;
+            padding: 18px;
+            border-radius: 18px;
+            background: rgba(19, 42, 58, 0.04);
+            color: var(--muted);
+        }
+
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 18px;
+        }
+
+        .card {
+            overflow: hidden;
+            border: 1px solid var(--border);
+            border-radius: 20px;
+            background: #ffffff;
+            transition: transform 160ms ease, box-shadow 160ms ease;
+        }
+
+        .card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 16px 28px rgba(19, 42, 58, 0.12);
+        }
+
+        .card a {
+            display: block;
+            color: inherit;
+            text-decoration: none;
+        }
+
+        .card img {
+            width: 100%;
+            aspect-ratio: 16 / 10;
+            object-fit: cover;
+            background: linear-gradient(135deg, #d9e7ef, #f5f9fb);
+        }
+
+        .card-body {
+            padding: 14px 16px 16px;
+        }
+
+        .card-title {
+            margin: 0;
+            font-size: 0.95rem;
+            font-weight: 700;
+            word-break: break-word;
+        }
+
+        .card-path {
+            margin-top: 8px;
+            color: var(--muted);
+            font-size: 0.85rem;
+            word-break: break-all;
+        }
+
+        .viewer[hidden] {
+            display: none;
+        }
+
+        .viewer {
+            position: fixed;
+            inset: 0;
+            z-index: 1000;
+            display: grid;
+            grid-template-rows: auto 1fr auto;
+            background: rgba(7, 16, 24, 0.9);
+            backdrop-filter: blur(10px);
+        }
+
+        .viewer-topbar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 16px;
+            padding: 18px 22px 8px;
+            color: #f4f8fb;
+        }
+
+        .viewer-meta {
+            min-width: 0;
+        }
+
+        .viewer-title {
+            margin: 0;
+            font-size: 1rem;
+            font-weight: 700;
+            word-break: break-word;
+        }
+
+        .viewer-path {
+            margin-top: 6px;
+            color: rgba(244, 248, 251, 0.72);
+            font-size: 0.88rem;
+            word-break: break-all;
+        }
+
+        .viewer-close,
+        .viewer-nav {
+            border: 0;
+            border-radius: 999px;
+            background: rgba(255, 255, 255, 0.12);
+            color: #ffffff;
+            cursor: pointer;
+            transition: background 160ms ease, transform 160ms ease;
+        }
+
+        .viewer-close:hover,
+        .viewer-nav:hover {
+            background: rgba(255, 255, 255, 0.22);
+            transform: translateY(-1px);
+        }
+
+        .viewer-close {
+            padding: 10px 14px;
+            font: inherit;
+            font-weight: 700;
+        }
+
+        .viewer-stage {
+            display: grid;
+            grid-template-columns: auto 1fr auto;
+            align-items: center;
+            gap: 16px;
+            min-height: 0;
+            padding: 12px 18px;
+        }
+
+        .viewer-nav {
+            width: 52px;
+            height: 52px;
+            font-size: 1.5rem;
+            font-weight: 700;
+        }
+
+        .viewer-figure {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-width: 0;
+            min-height: 0;
+            margin: 0;
+        }
+
+        .viewer-image {
+            max-width: 100%;
+            max-height: calc(100vh - 180px);
+            border-radius: 18px;
+            box-shadow: 0 18px 48px rgba(0, 0, 0, 0.35);
+            background: #09131a;
+        }
+
+        .viewer-footer {
+            padding: 0 22px 18px;
+            color: rgba(244, 248, 251, 0.78);
+            font-size: 0.92rem;
+        }
+
+        @media (max-width: 720px) {
+            header,
+            main {
+                padding-left: 16px;
+                padding-right: 16px;
+            }
+
+            .section-header {
+                flex-direction: column;
+                align-items: flex-start;
+            }
+
+            .viewer-stage {
+                grid-template-columns: 1fr;
+                grid-template-rows: auto auto auto;
+            }
+
+            .viewer-nav {
+                width: 100%;
+                border-radius: 16px;
+                height: 44px;
+            }
+
+            .viewer-image {
+                max-height: calc(100vh - 240px);
+            }
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>Forecast PNG Viewer</h1>
+        <p class="subtitle">
+            Browse the latest PNG outputs written under DATA, including AI forecast images, MRMS observations,
+            and HRRR precipitation-rate plots.
+        </p>
+        <div class="summary">{{ total_images }} image{% if total_images != 1 %}s{% endif %} indexed</div>
+        <p class="hint">Click any image, then use the left and right arrow keys to move through the gallery. Press Escape to close.</p>
+    </header>
+
+    <main>
+        {% for section in sections %}
+        <section class="section" id="{{ section.key }}">
+            <div class="section-header">
+                <div>
+                    <h2>{{ section.title }}</h2>
+                    <p>{{ section.description }}</p>
+                </div>
+                <div class="count">{{ section.images|length }} shown</div>
+            </div>
+
+            {% if section.images %}
+            <div class="grid">
+                {% for image in section.images %}
+                <article class="card">
+                    <a href="{{ url_for('data_file', relative_path=image.relative_path) }}" data-gallery-image data-gallery-title="{{ image.name }}" data-gallery-path="{{ image.relative_path }}">
+                        <img src="{{ url_for('data_file', relative_path=image.relative_path) }}" alt="{{ image.name }}">
+                        <div class="card-body">
+                            <p class="card-title">{{ image.name }}</p>
+                            <div class="card-path">{{ image.relative_path }}</div>
+                        </div>
+                    </a>
+                </article>
+                {% endfor %}
+            </div>
+            {% else %}
+            <p class="empty">No PNG files found for this section yet.</p>
+            {% endif %}
+        </section>
+        {% endfor %}
+    </main>
+
+    <div class="viewer" id="viewer" hidden>
+        <div class="viewer-topbar">
+            <div class="viewer-meta">
+                <p class="viewer-title" id="viewer-title"></p>
+                <div class="viewer-path" id="viewer-path"></div>
+            </div>
+            <button class="viewer-close" id="viewer-close" type="button">Close</button>
+        </div>
+
+        <div class="viewer-stage">
+            <button class="viewer-nav" id="viewer-prev" type="button" aria-label="Previous image">&#8592;</button>
+            <figure class="viewer-figure">
+                <img class="viewer-image" id="viewer-image" alt="">
+            </figure>
+            <button class="viewer-nav" id="viewer-next" type="button" aria-label="Next image">&#8594;</button>
+        </div>
+
+        <div class="viewer-footer" id="viewer-footer"></div>
+    </div>
+
+    <script>
+        (() => {
+            const links = Array.from(document.querySelectorAll('[data-gallery-image]'));
+            if (!links.length) {
+                return;
+            }
+
+            const viewer = document.getElementById('viewer');
+            const viewerImage = document.getElementById('viewer-image');
+            const viewerTitle = document.getElementById('viewer-title');
+            const viewerPath = document.getElementById('viewer-path');
+            const viewerFooter = document.getElementById('viewer-footer');
+            const viewerClose = document.getElementById('viewer-close');
+            const viewerPrev = document.getElementById('viewer-prev');
+            const viewerNext = document.getElementById('viewer-next');
+
+            let activeIndex = 0;
+
+            function renderViewer(index) {
+                const normalizedIndex = (index + links.length) % links.length;
+                const link = links[normalizedIndex];
+                activeIndex = normalizedIndex;
+                viewerImage.src = link.href;
+                viewerImage.alt = link.dataset.galleryTitle || '';
+                viewerTitle.textContent = link.dataset.galleryTitle || link.href;
+                viewerPath.textContent = link.dataset.galleryPath || '';
+                viewerFooter.textContent = 'Image ' + (normalizedIndex + 1) + ' of ' + links.length;
+            }
+
+            function openViewer(index) {
+                renderViewer(index);
+                viewer.hidden = false;
+                document.body.style.overflow = 'hidden';
+            }
+
+            function closeViewer() {
+                viewer.hidden = true;
+                document.body.style.overflow = '';
+            }
+
+            links.forEach((link, index) => {
+                link.addEventListener('click', (event) => {
+                    event.preventDefault();
+                    openViewer(index);
+                });
+            });
+
+            viewerPrev.addEventListener('click', () => renderViewer(activeIndex - 1));
+            viewerNext.addEventListener('click', () => renderViewer(activeIndex + 1));
+            viewerClose.addEventListener('click', closeViewer);
+
+            viewer.addEventListener('click', (event) => {
+                if (event.target === viewer) {
+                    closeViewer();
+                }
+            });
+
+            document.addEventListener('keydown', (event) => {
+                if (viewer.hidden) {
+                    return;
+                }
+                if (event.key === 'ArrowLeft') {
+                    event.preventDefault();
+                    renderViewer(activeIndex - 1);
+                } else if (event.key === 'ArrowRight') {
+                    event.preventDefault();
+                    renderViewer(activeIndex + 1);
+                } else if (event.key === 'Escape') {
+                    event.preventDefault();
+                    closeViewer();
+                }
+            });
+        })();
+    </script>
+</body>
+</html>
